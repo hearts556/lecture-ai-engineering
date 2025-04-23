@@ -8,7 +8,7 @@ from data import create_sample_evaluation_data
 from metrics import get_metrics_descriptions
 
 # --- チャットページのUI ---
-def display_chat_page(pipe):
+def display_chat_page(pipes):
     """チャットページのUIを表示する"""
     st.subheader("質問を入力してください")
     user_question = st.text_area("質問", key="question_input", height=100, value=st.session_state.get("current_question", ""))
@@ -17,42 +17,56 @@ def display_chat_page(pipe):
     # セッション状態の初期化（安全のため）
     if "current_question" not in st.session_state:
         st.session_state.current_question = ""
-    if "current_answer" not in st.session_state:
-        st.session_state.current_answer = ""
-    if "response_time" not in st.session_state:
-        st.session_state.response_time = 0.0
+    if "current_answer_1" not in st.session_state:
+        st.session_state.current_answer_1 = ""
+    if "response_time_1" not in st.session_state:
+        st.session_state.response_time_1 = 0.0
+    if "current_answer_2" not in st.session_state:
+        st.session_state.current_answer_2 = ""
+    if "response_time_2" not in st.session_state:
+        st.session_state.response_time_2 = 0.0
     if "feedback_given" not in st.session_state:
         st.session_state.feedback_given = False
 
     # 質問が送信された場合
     if submit_button and user_question:
         st.session_state.current_question = user_question
-        st.session_state.current_answer = "" # 回答をリセット
+        st.session_state.current_answer_1 = "" # 回答をリセット
+        st.session_state.current_answer_2 = "" # 回答をリセット
         st.session_state.feedback_given = False # フィードバック状態もリセット
 
         with st.spinner("モデルが回答を生成中..."):
-            answer, response_time = generate_response(pipe, user_question)
-            st.session_state.current_answer = answer
-            st.session_state.response_time = response_time
+            model_names, response = generate_response(pipes, user_question)
+            st.session_state.current_answer_1 = response[0]
+            st.session_state.response_time_1 = response[1]
+            st.session_state.current_answer_2 = response[2]
+            st.session_state.response_time_2 = response[3]
+            st.session_state.model_names = model_names
             # ここでrerunすると回答とフィードバックが一度に表示される
             st.rerun()
 
     # 回答が表示されるべきか判断 (質問があり、回答が生成済みで、まだフィードバックされていない)
-    if st.session_state.current_question and st.session_state.current_answer:
-        st.subheader("回答:")
-        st.markdown(st.session_state.current_answer) # Markdownで表示
-        st.info(f"応答時間: {st.session_state.response_time:.2f}秒")
+    if st.session_state.current_question and st.session_state.current_answer_1 and st.session_state.current_answer_2:
+        st.markdown(st.session_state.current_answer_1) # Markdownで表示
+        st.markdown("### モデル1の回答")
+        st.info(f"応答時間: {st.session_state.response_time_1:.2f}秒")
+        st.markdown("### モデル2の回答")
+        st.markdown(st.session_state.current_answer_2) # Markdownで表示
+        st.info(f"応答時間: {st.session_state.response_time_2:.2f}秒")
 
         # フィードバックフォームを表示 (まだフィードバックされていない場合)
         if not st.session_state.feedback_given:
             display_feedback_form()
         else:
              # フィードバック送信済みの場合、次の質問を促すか、リセットする
+             st.write(f"上のモデルは{st.session_state.model_names[0]}で下のモデルは{st.session_state.model_names[1]}でした。")
              if st.button("次の質問へ"):
                   # 状態をリセット
                   st.session_state.current_question = ""
-                  st.session_state.current_answer = ""
-                  st.session_state.response_time = 0.0
+                  st.session_state.current_answer_1 = ""
+                  st.session_state.response_time_1 = 0.0
+                  st.session_state.current_answer_2 = ""
+                  st.session_state.response_time_2 = 0.0
                   st.session_state.feedback_given = False
                   st.rerun() # 画面をクリア
 
@@ -61,27 +75,30 @@ def display_feedback_form():
     """フィードバック入力フォームを表示する"""
     with st.form("feedback_form"):
         st.subheader("フィードバック")
-        feedback_options = ["正確", "部分的に正確", "不正確"]
+        feedback_models_options = ["Qwen2.5", "Gemma3"]
         # label_visibility='collapsed' でラベルを隠す
-        feedback = st.radio("回答の評価", feedback_options, key="feedback_radio", label_visibility='collapsed', horizontal=True)
+        st.write("どちらのモデルが好みですか？", label_visibility='collapsed')
+        feedback_models = st.radio("モデル比較", feedback_models_options, key="feedback_model_select", label_visibility='collapsed')
         correct_answer = st.text_area("より正確な回答（任意）", key="correct_answer_input", height=100)
         feedback_comment = st.text_area("コメント（任意）", key="feedback_comment_input", height=100)
         submitted = st.form_submit_button("フィードバックを送信")
         if submitted:
             # フィードバックをデータベースに保存
-            is_correct = 1.0 if feedback == "正確" else (0.5 if feedback == "部分的に正確" else 0.0)
+            preferred_model = 0 if feedback_models == "上" else 0
             # コメントがない場合でも '正確' などの評価はfeedbackに含まれるようにする
-            combined_feedback = f"{feedback}"
+            combined_feedback = 1 # 正確性初期値　とりあえず
             if feedback_comment:
                 combined_feedback += f": {feedback_comment}"
 
             save_to_db(
                 st.session_state.current_question,
-                st.session_state.current_answer,
+                st.session_state.current_answer_1,
+                st.session_state.current_answer_2,
                 combined_feedback,
                 correct_answer,
-                is_correct,
-                st.session_state.response_time
+                preferred_model,
+                st.session_state.response_time_1,
+                st.session_state.response_time_2
             )
             st.session_state.feedback_given = True
             st.success("フィードバックが保存されました！")
@@ -159,7 +176,7 @@ def display_history_list(history_df):
             st.markdown("---")
             cols = st.columns(3)
             cols[0].metric("正確性スコア", f"{row['is_correct']:.1f}")
-            cols[1].metric("応答時間(秒)", f"{row['response_time']:.2f}")
+            cols[1].metric("応答時間(秒)", f"{row['response_time_1']:.2f}")
             cols[2].metric("単語数", f"{row['word_count']}")
 
             cols = st.columns(3)
@@ -205,11 +222,11 @@ def display_metrics_analysis(history_df):
             key="metric_select"
         )
 
-        chart_data = analysis_df[['response_time', metric_option, '正確性']].dropna() # NaNを除外
+        chart_data = analysis_df[['response_time_1', metric_option, '正確性']].dropna() # NaNを除外
         if not chart_data.empty:
              st.scatter_chart(
                 chart_data,
-                x='response_time',
+                x='response_time_1',
                 y=metric_option,
                 color='正確性',
             )
