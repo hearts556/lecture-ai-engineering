@@ -84,7 +84,7 @@ def display_feedback_form():
         submitted = st.form_submit_button("フィードバックを送信")
         if submitted:
             # フィードバックをデータベースに保存
-            preferred_model = 0 if feedback_models == "上" else 0
+            preferred_model = 0 if feedback_models == "上" else 1
             # コメントがない場合でも '正確' などの評価はfeedbackに含まれるようにする
             combined_feedback = 1 # 正確性初期値　とりあえず
             if feedback_comment:
